@@ -1,0 +1,13 @@
+flask
+flask-cors
+python-dotenv
+PyGithub
+transformers
+torch
+langchain
+python-magic
+requests
+numpy
+pandas
+scikit-learn
+tqdm
