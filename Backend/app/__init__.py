@@ -5,7 +5,15 @@ import os
 
 def create_app():
     app = Flask(__name__)
-    CORS(app)
+    
+    # Configure CORS
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": ["http://localhost:3000"],
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type"]
+        }
+    })
     
     # Load environment variables
     load_dotenv()
@@ -13,6 +21,9 @@ def create_app():
     # Configure app
     app.config['GITHUB_TOKEN'] = os.getenv('GITHUB_TOKEN')
     app.config['HUGGINGFACE_TOKEN'] = os.getenv('HUGGINGFACE_TOKEN')
+    
+    # Enable debug mode
+    app.debug = True
     
     # Register blueprints
     from .routes import main
