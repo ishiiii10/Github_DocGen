@@ -9,6 +9,10 @@ from sentence_transformers import SentenceTransformer
 import markdown
 from bs4 import BeautifulSoup
 import re
+import ast
+import networkx as nx
+from collections import defaultdict
+import json
 
 class RepositoryAnalyzer:
     def __init__(self, github_token: str, huggingface_token: str):
@@ -30,13 +34,87 @@ class RepositoryAnalyzer:
         Repo.clone_from(repo_url, temp_dir)
         return temp_dir, repo_name
 
+    def analyze_code_complexity(self, code: str) -> Dict:
+        """Analyze code complexity metrics."""
+        try:
+            tree = ast.parse(code)
+            complexity = {
+                'cyclomatic_complexity': 0,
+                'function_count': 0,
+                'class_count': 0,
+                'max_nesting': 0,
+                'avg_function_length': 0
+            }
+            
+            function_lengths = []
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    complexity['function_count'] += 1
+                    # Calculate cyclomatic complexity
+                    complexity['cyclomatic_complexity'] += 1
+                    for child in ast.walk(node):
+                        if isinstance(child, (ast.If, ast.While, ast.For, ast.Try, ast.ExceptHandler)):
+                            complexity['cyclomatic_complexity'] += 1
+                    
+                    # Calculate function length
+                    function_lengths.append(len(node.body))
+                
+                elif isinstance(node, ast.ClassDef):
+                    complexity['class_count'] += 1
+                
+                # Calculate nesting depth
+                if isinstance(node, (ast.If, ast.While, ast.For, ast.Try)):
+                    depth = 0
+                    current = node
+                    while hasattr(current, 'parent'):
+                        current = current.parent
+                        depth += 1
+                    complexity['max_nesting'] = max(complexity['max_nesting'], depth)
+            
+            if function_lengths:
+                complexity['avg_function_length'] = sum(function_lengths) / len(function_lengths)
+            
+            return complexity
+        except:
+            return {}
+
+    def analyze_dependencies(self, repo_path: str) -> Dict:
+        """Analyze project dependencies."""
+        dependencies = {
+            'python': [],
+            'javascript': [],
+            'java': [],
+            'ruby': []
+        }
+        
+        # Python dependencies
+        req_file = os.path.join(repo_path, 'requirements.txt')
+        if os.path.exists(req_file):
+            with open(req_file, 'r') as f:
+                dependencies['python'] = [line.strip() for line in f if line.strip()]
+        
+        # JavaScript dependencies
+        package_json = os.path.join(repo_path, 'package.json')
+        if os.path.exists(package_json):
+            with open(package_json, 'r') as f:
+                try:
+                    data = json.load(f)
+                    dependencies['javascript'] = list(data.get('dependencies', {}).keys())
+                except:
+                    pass
+        
+        return dependencies
+
     def analyze_code_structure(self, repo_path: str) -> Dict:
         """Analyze the repository structure and extract key information."""
         structure = {
             'languages': {},
             'main_files': [],
             'dependencies': set(),
-            'entry_points': []
+            'entry_points': [],
+            'complexity_metrics': defaultdict(dict),
+            'dependencies': self.analyze_dependencies(repo_path)
         }
         
         for root, _, files in os.walk(repo_path):
@@ -45,8 +123,17 @@ class RepositoryAnalyzer:
                     ext = os.path.splitext(file)[1]
                     structure['languages'][ext] = structure['languages'].get(ext, 0) + 1
                     
+                    file_path = os.path.join(root, file)
                     if file in ['main.py', 'app.py', 'index.js', 'main.go']:
-                        structure['entry_points'].append(os.path.join(root, file))
+                        structure['entry_points'].append(file_path)
+                    
+                    # Analyze code complexity
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            code = f.read()
+                            structure['complexity_metrics'][file_path] = self.analyze_code_complexity(code)
+                    except:
+                        pass
                     
                     # Check for dependency files
                     if file in ['requirements.txt', 'package.json', 'go.mod', 'Gemfile']:
@@ -113,13 +200,27 @@ class RepositoryAnalyzer:
         # Dependencies
         if structure['dependencies']:
             readme += "\n## Dependencies\n"
-            for dep in structure['dependencies']:
-                readme += f"- {os.path.basename(dep)}\n"
+            for lang, deps in structure['dependencies'].items():
+                if deps:
+                    readme += f"\n### {lang.title()}\n"
+                    for dep in deps:
+                        readme += f"- {dep}\n"
         
         # Project Structure
         readme += "\n## Project Structure\n"
         readme += "The project contains the following main components:\n"
         for entry in structure['entry_points']:
             readme += f"- {os.path.basename(entry)}\n"
+        
+        # Code Complexity
+        readme += "\n## Code Complexity Analysis\n"
+        for file_path, metrics in structure['complexity_metrics'].items():
+            if metrics:
+                readme += f"\n### {os.path.basename(file_path)}\n"
+                readme += f"- Cyclomatic Complexity: {metrics.get('cyclomatic_complexity', 'N/A')}\n"
+                readme += f"- Function Count: {metrics.get('function_count', 'N/A')}\n"
+                readme += f"- Class Count: {metrics.get('class_count', 'N/A')}\n"
+                readme += f"- Max Nesting Depth: {metrics.get('max_nesting', 'N/A')}\n"
+                readme += f"- Average Function Length: {metrics.get('avg_function_length', 'N/A'):.2f} lines\n"
         
         return readme 
